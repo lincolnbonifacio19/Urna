@@ -12,6 +12,7 @@ export default function Urna() {
   const [digits, setDigits] = useState("");
   const [blank, setBlank] = useState(false);
   const [fim, setFim] = useState(false);
+  const [already, setAlready] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const token = useRef<string>(crypto.randomUUID());
@@ -21,18 +22,19 @@ export default function Urna() {
     const { data: p } = await supabase.from("positions").select("*").eq("election_id", id).order("sort");
     const { data: c } = await supabase.from("candidates").select("*").in("position_id", (p ?? []).map(x => x.id)).order("sort");
     setEl(e); setPos(p ?? []); setCands(c ?? []);
+    try { setAlready(localStorage.getItem("voted:" + id) === "r" + (e?.round ?? 0)); } catch {}
   })(); }, [id]);
 
   const cur = pos[i];
   const full = cur && digits.length === cur.digits;
   const cand = full ? cands.find(c => c.position_id === cur.id && c.number === digits) : null;
   const press = useCallback((d: string) => {
-    if (!cur || blank || busy) return;
+    if (!cur || blank || busy || already) return;
     setDigits(v => (v.length < cur.digits ? v + d : v));
-  }, [cur, blank, busy]);
+  }, [cur, blank, busy, already]);
   const corrige = () => { setDigits(""); setBlank(false); setErr(""); };
   const confirma = async () => {
-    if (busy || !cur || !(blank || full)) return;
+    if (busy || already || !cur || !(blank || full)) return;
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("cast_vote", {
       p_position: cur.id, p_kind: blank ? "blank" : "candidate", p_number: digits, p_token: token.current });
@@ -40,7 +42,11 @@ export default function Urna() {
     if (error) { setErr(error.message); return; }
     token.current = crypto.randomUUID(); corrige();
     if (i + 1 < pos.length) setI(i + 1);
-    else { setFim(true); setTimeout(() => { setFim(false); setI(0); }, 4000); }
+    else {
+      try { localStorage.setItem("voted:" + id, "r" + (el.round ?? 0)); } catch {}
+      setFim(true);
+      setTimeout(() => { setFim(false); setAlready(true); }, 4000);
+    }
   };
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -64,6 +70,7 @@ export default function Urna() {
           <div className="text-xs uppercase text-zinc-500">{el.site_title} — {el.name}</div>
           {!open ? <p className="mt-16 text-center text-xl">Votação {el.status === "closed" ? "encerrada" : "pausada"}.</p>
           : fim ? <p className="mt-20 text-center text-7xl font-black tracking-widest" style={{ color }}>FIM</p>
+          : already ? <p className="mt-16 text-center text-xl">Você já votou nesta eleição neste aparelho. Obrigado!</p>
           : !cur ? <p>Sem cargos cadastrados.</p> : (<>
             <h2 className="mt-2 text-xl font-bold">{cur.name}</h2>
             <div className="mt-3 flex gap-2">
@@ -90,11 +97,11 @@ export default function Urna() {
         <section className="grid content-start gap-2">
           <div className="grid grid-cols-3 gap-2">{["1","2","3","4","5","6","7","8","9"].map(k => <Key key={k} k={k} />)}<div /><Key k="0" /><div /></div>
           <div className="grid grid-cols-3 gap-2 text-xs font-bold">
-            <button disabled={!el.blank_allowed || !open} onClick={() => { setDigits(""); setBlank(true); }} className="h-14 rounded-lg border bg-white disabled:opacity-40">BRANCO</button>
+            <button disabled={!el.blank_allowed || !open || already} onClick={() => { setDigits(""); setBlank(true); }} className="h-14 rounded-lg border bg-white disabled:opacity-40">BRANCO</button>
             <button onClick={corrige} className="h-14 rounded-lg bg-orange-500 text-white">CORRIGE</button>
-            <button onClick={confirma} disabled={busy || !(blank || full)} className="h-14 rounded-lg bg-green-600 text-white disabled:opacity-40">CONFIRMA</button>
+            <button onClick={confirma} disabled={busy || already || !(blank || full)} className="h-14 rounded-lg bg-green-600 text-white disabled:opacity-40">CONFIRMA</button>
           </div>
         </section>
       </div>
     </main>);
-      }
+}
