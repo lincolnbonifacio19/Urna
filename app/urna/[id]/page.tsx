@@ -3,6 +3,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+let ctx: AudioContext | null = null;
+function prep() {
+  try {
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (!ctx) ctx = new AC();
+    ctx.resume();
+  } catch {}
+}
+function tom(inicio: number, dur: number, freq = 1000) {
+  try {
+    if (!ctx) return;
+    const t = ctx.currentTime + inicio;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "square";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.01);
+    g.gain.setValueAtTime(0.2, t + dur - 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch {}
+}
+function somTecla() { prep(); tom(0, 0.04, 800); }
+function somCargo() { tom(0, 0.15, 1000); }
+function somFim() { tom(0, 0.08); tom(0.14, 0.08); tom(0.28, 0.08); tom(0.45, 0.9); }
+
 export default function Urna() {
   const { id } = useParams<{ id: string }>();
   const [el, setEl] = useState<any>(null);
@@ -30,19 +58,22 @@ export default function Urna() {
   const cand = full ? cands.find(c => c.position_id === cur.id && c.number === digits) : null;
   const press = useCallback((d: string) => {
     if (!cur || blank || busy || already) return;
+    somTecla();
     setDigits(v => (v.length < cur.digits ? v + d : v));
   }, [cur, blank, busy, already]);
   const corrige = () => { setDigits(""); setBlank(false); setErr(""); };
   const confirma = async () => {
     if (busy || already || !cur || !(blank || full)) return;
+    prep();
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("cast_vote", {
       p_position: cur.id, p_kind: blank ? "blank" : "candidate", p_number: digits, p_token: token.current });
     setBusy(false);
     if (error) { setErr(error.message); return; }
     token.current = crypto.randomUUID(); corrige();
-    if (i + 1 < pos.length) setI(i + 1);
+    if (i + 1 < pos.length) { somCargo(); setI(i + 1); }
     else {
+      somFim();
       try { localStorage.setItem("voted:" + id, "r" + (el.round ?? 0)); } catch {}
       setFim(true);
       setTimeout(() => { setFim(false); setAlready(true); }, 4000);
@@ -97,8 +128,8 @@ export default function Urna() {
         <section className="grid content-start gap-2">
           <div className="grid grid-cols-3 gap-2">{["1","2","3","4","5","6","7","8","9"].map(k => <Key key={k} k={k} />)}<div /><Key k="0" /><div /></div>
           <div className="grid grid-cols-3 gap-2 text-xs font-bold">
-            <button disabled={!el.blank_allowed || !open || already} onClick={() => { setDigits(""); setBlank(true); }} className="h-14 rounded-lg border bg-white disabled:opacity-40">BRANCO</button>
-            <button onClick={corrige} className="h-14 rounded-lg bg-orange-500 text-white">CORRIGE</button>
+            <button disabled={!el.blank_allowed || !open || already} onClick={() => { somTecla(); setDigits(""); setBlank(true); }} className="h-14 rounded-lg border bg-white disabled:opacity-40">BRANCO</button>
+            <button onClick={() => { somTecla(); corrige(); }} className="h-14 rounded-lg bg-orange-500 text-white">CORRIGE</button>
             <button onClick={confirma} disabled={busy || already || !(blank || full)} className="h-14 rounded-lg bg-green-600 text-white disabled:opacity-40">CONFIRMA</button>
           </div>
         </section>
