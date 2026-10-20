@@ -4,11 +4,24 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 let ctx: AudioContext | null = null;
+let audio: HTMLAudioElement | null = null;
+let liberado = false;
+
 function prep() {
   try {
     const AC = window.AudioContext || (window as any).webkitAudioContext;
     if (!ctx) ctx = new AC();
     ctx.resume();
+  } catch {}
+}
+function liberarAudio() {
+  try {
+    if (!audio) { audio = new Audio("/som.mp3"); audio.preload = "auto"; }
+    if (liberado) return;
+    liberado = true;
+    audio.muted = true;
+    audio.play().then(() => { audio!.pause(); audio!.currentTime = 0; audio!.muted = false; })
+      .catch(() => { liberado = false; if (audio) audio.muted = false; });
   } catch {}
 }
 function tom(inicio: number, dur: number, freq = 1000) {
@@ -27,9 +40,14 @@ function tom(inicio: number, dur: number, freq = 1000) {
     o.start(t); o.stop(t + dur + 0.02);
   } catch {}
 }
-function somTecla() { prep(); tom(0, 0.04, 800); }
-function somCargo() { tom(0, 0.15, 1000); }
-function somFim() { tom(0, 0.08); tom(0.14, 0.08); tom(0.28, 0.08); tom(0.45, 0.9); }
+function somTecla() { prep(); liberarAudio(); tom(0, 0.04, 800); }
+function somConfirma() {
+  try {
+    if (!audio) audio = new Audio("/som.mp3");
+    audio.muted = false; audio.currentTime = 0;
+    audio.play().catch(() => {});
+  } catch {}
+}
 
 export default function Urna() {
   const { id } = useParams<{ id: string }>();
@@ -64,16 +82,16 @@ export default function Urna() {
   const corrige = () => { setDigits(""); setBlank(false); setErr(""); };
   const confirma = async () => {
     if (busy || already || !cur || !(blank || full)) return;
-    prep();
+    prep(); liberarAudio();
     setBusy(true); setErr("");
     const { error } = await supabase.rpc("cast_vote", {
       p_position: cur.id, p_kind: blank ? "blank" : "candidate", p_number: digits, p_token: token.current });
     setBusy(false);
     if (error) { setErr(error.message); return; }
+    somConfirma();
     token.current = crypto.randomUUID(); corrige();
-    if (i + 1 < pos.length) { somCargo(); setI(i + 1); }
+    if (i + 1 < pos.length) setI(i + 1);
     else {
-      somFim();
       try { localStorage.setItem("voted:" + id, "r" + (el.round ?? 0)); } catch {}
       setFim(true);
       setTimeout(() => { setFim(false); setAlready(true); }, 4000);
